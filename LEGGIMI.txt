@@ -1,0 +1,27 @@
+InkAnimus OS — SAKURA (versione ROSA)
+====================================
+
+PWA completa pronta da caricare. Contiene:
+- index.html         → l'app (login, cura, rete, arcade, Nexus City, market, inventario)
+- manifest.webmanifest → configurazione PWA
+- sw.js              → service worker (offline + installazione)
+- icons/             → icone app
+
+NOVITÀ DI QUESTA VERSIONE
+- Meraviglia di Nexus City: "Giganti di Cyber-Prama" (i Giganti di Mont'e Prama in chiave cyber)
+- Tema Sakura (rosa) completo su tutta l'app
+- Stesse funzioni della versione blu: Giganti di Cyber-Prama, testi nav grandi, scanline attenuato
+
+COME CARICARLA SU NETLIFY
+1. Trascina l'INTERA cartella "pwa_sakura_nav" su https://app.netlify.com/drop
+   (oppure collega la cartella al tuo sito esistente)
+2. Apri il link che ti dà Netlify dal telefono
+3. "Aggiungi a schermata Home" → si installa come app
+
+NOTE
+- La prima apertura online registra il service worker; dopo funziona offline.
+- I dati cliente restano sul dispositivo (localStorage), come nelle altre versioni.
+- Per aggiornare l'app in futuro basta ricaricare il file index.html sullo stesso sito:
+  il service worker è in modalità "network-first" sull'HTML, quindi prende la versione fresca.
+
+GemBucher Tattooer — Podere 173, Ozieri
