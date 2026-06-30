@@ -611,7 +611,10 @@
                     <div style="display:flex;flex-direction:column;gap:6px;">
                         <button class="cyber-btn" style="width:100%;" onclick="promptCashAdjustment()">⬡ REGOLA CASSA (ADMIN)</button>
                         <button class="cyber-btn" style="width:100%;border-color:var(--neon-blue);color:var(--neon-blue);" onclick="promptChangePassword()">⬡ CAMBIA PASSWORD</button>
-                        <button class="cyber-btn" style="width:100%;border-color:var(--neon-green);color:var(--neon-green);" onclick="backupData()">⬡ BACKUP DATI</button>
+                        <button class="cyber-btn" style="width:100%;border-color:var(--neon-green);color:var(--neon-green);" onclick="backupData()">⬡ BACKUP DATI (SCARICA)</button>
+                        <button class="cyber-btn" style="width:100%;border-color:var(--neon-green);color:var(--neon-green);" onclick="document.getElementById('import-backup-file').click()">⬡ CARICA BACKUP (RIPRISTINA)</button>
+                        <input type="file" id="import-backup-file" accept="application/json,.json" style="display:none" onchange="importBackup(event)">
+                        <button class="cyber-btn" style="width:100%;border-color:var(--neon-yellow);color:var(--neon-yellow);" onclick="openSyncExport()">📤 INVIA DATI A STUDIO (QR / CODICE)</button>
                         <button class="cyber-btn" style="width:100%;border-color:var(--neon-cyan);color:var(--neon-cyan);" onclick="setPublicUrl()">⬡ INDIRIZZO SITO (per link WhatsApp)</button>
                         <button class="cyber-btn" style="width:100%;border-color:var(--neon-purple);color:var(--neon-purple);" onclick="generateRulebookPDF()">📖 SCARICA REGOLAMENTO COMPLETO</button>
                         <button class="cyber-btn" style="width:100%;" onclick="startTutorial()">❓ RIVEDI TUTORIAL</button>
@@ -2763,6 +2766,127 @@ function backupData(){
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     toast('Backup scaricato!','success');
+}
+
+// ===== CARICA BACKUP (ripristino profilo da file .json) =====
+function importBackup(ev){
+    const file = ev.target.files && ev.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e){
+        try{
+            const parsed = JSON.parse(e.target.result);
+            // accetto sia {STATE,...} (formato backupData) sia lo STATE diretto
+            const incoming = parsed.STATE ? parsed.STATE : parsed;
+            if(!incoming || typeof incoming!=='object' || !incoming.user){
+                throw new Error('formato non valido');
+            }
+            if(!confirm('Vuoi ripristinare questo backup? I dati attuali su questo dispositivo verranno sostituiti.')){
+                ev.target.value=''; return;
+            }
+            STATE = incoming;
+            normalizeState();
+            saveState();
+            applyTheme(STATE.activeTheme);
+            applyCRT(crtIsOn());
+            toast('Backup ripristinato con successo!','success');
+            // ricarico la dashboard con i dati nuovi
+            setTimeout(()=>{ location.reload(); }, 900);
+        }catch(err){
+            toast('File non valido: '+(err.message||'errore'),'error');
+        }
+        ev.target.value='';
+    };
+    reader.onerror = function(){ toast('Errore lettura file','error'); ev.target.value=''; };
+    reader.readAsText(file);
+}
+
+// ============================================================
+// SYNC VERSO IL GESTIONALE (pacchetto INKSYNC)
+// ============================================================
+// Costruisce il pacchetto dati che lo studio importer� nel gestionale.
+function buildSyncPackage(full){
+    const healed = STATE.tattoos.filter(t=>t.healed).length;
+    const cred = getStreetCred();
+    // codici generati dal cliente (solo quelli con un codice valorizzato)
+    const codes = (STATE.codes||[]).map((c,i)=>({
+        seq: c.seq || (i+1),
+        code: c.code || c.value || (typeof c==='string'?c:''),
+    })).filter(c=>c.code);
+    // livello citt� = numero lotti costruiti + somma livelli
+    let cityBuilt=0, cityLevels=0, hasWonder=false;
+    (STATE.city||[]).forEach(lot=>{
+        if(lot && lot.type){ cityBuilt++; cityLevels += (lot.level||1); if(lot.type==='wonder') hasWonder=true; }
+    });
+    const pkg = {
+        t: 'INKSYNC',          // tipo pacchetto (per riconoscimento nel gestionale)
+        v: 1,                  // versione formato
+        ts: Date.now(),
+        name: STATE.user.name||'',
+        rank: STATE.user.rank||'Adepto',
+        cr: STATE.user.cr||0,
+        cash: STATE.user.cash||0,
+        healed: healed,
+        credLevel: cred.level, credTier: cred.tier,
+        recruits: STATE.recruitsCompleted||0,
+        codes: codes,
+        scores: {
+            tetris: (STATE.stats&&STATE.stats.tetrisLines)||0,
+            snake: (STATE.stats&&STATE.stats.snakeMax)||0,
+            arkanoid: (STATE.stats&&STATE.stats.arkBricks)||0,
+            invaders: (STATE.stats&&STATE.stats.invKills)||0,
+            tower: (STATE.stats&&STATE.stats.towerMax)||0,
+            doodle: (STATE.stats&&STATE.stats.doodleMax)||0,
+            bubble: (STATE.stats&&STATE.stats.bubblePops)||0,
+            neural: (STATE.stats&&STATE.stats.neuralBest)||0,
+            impact: (STATE.stats&&STATE.stats.impactMax)||0,
+        },
+        city: { built: cityBuilt, levels: cityLevels, wonder: hasWonder },
+        achievements: (STATE.achievements||[]).length,
+    };
+    if(full){
+        // pacchetto completo: includo lo STATE intero per un import totale via testo
+        pkg.fullState = STATE;
+    }
+    return pkg;
+}
+
+// Apre il pannello di esportazione (QR essenziale + testo completo)
+function openSyncExport(){
+    const compact = buildSyncPackage(false);
+    const full = buildSyncPackage(true);
+    const compactStr = JSON.stringify(compact);
+    const fullStr = 'INKSYNC1:' + btoa(unescape(encodeURIComponent(JSON.stringify(full))));
+    // QR via immagine generata da API pubblica se online, con fallback testo
+    const qrData = encodeURIComponent(compactStr);
+    const qrImg = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data='+qrData;
+    const html = `
+      <div class="modal-title">📤 INVIA DATI ALLO STUDIO</div>
+      <div class="modal-body" style="text-align:center;">
+        <p style="font-size:0.8rem;color:#8bb4cb;margin-bottom:10px;">Mostra questo QR allo studio, oppure copia il codice completo e invialo su WhatsApp.</p>
+        <div id="qr-box" style="background:#fff;padding:10px;border-radius:8px;display:inline-block;margin-bottom:6px;">
+          <img src="${qrImg}" alt="QR" width="220" height="220" style="display:block;" onerror="document.getElementById('qr-fallback').style.display='block';this.style.display='none';">
+        </div>
+        <div id="qr-fallback" style="display:none;font-size:0.72rem;color:var(--neon-yellow);margin-bottom:6px;">
+          QR non disponibile offline — usa il codice testo qui sotto. ⬇️
+        </div>
+        <p style="font-size:0.7rem;color:#8bb4cb;margin:8px 0 4px;">— oppure CODICE COMPLETO (consigliato, nessun limite) —</p>
+        <textarea id="sync-fulltext" readonly style="width:100%;height:80px;font-size:0.62rem;background:var(--card-bg);color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:8px;resize:none;">${fullStr}</textarea>
+        <div class="modal-btn-row" style="margin-top:10px;">
+          <button class="cyber-btn" onclick="copySyncText()">📋 COPIA CODICE</button>
+          <button class="cyber-btn" onclick="hideModal()">CHIUDI</button>
+        </div>
+      </div>`;
+    showCustomModal(html);
+}
+function copySyncText(){
+    const ta=document.getElementById('sync-fulltext');
+    if(!ta) return;
+    ta.select();
+    try{
+        navigator.clipboard.writeText(ta.value).then(()=>toast('Codice copiato! Incollalo nel gestionale.','success'))
+        .catch(()=>{ document.execCommand('copy'); toast('Codice copiato!','success'); });
+    }catch(e){ document.execCommand('copy'); toast('Codice copiato!','success'); }
 }
 
 // ============================================================
