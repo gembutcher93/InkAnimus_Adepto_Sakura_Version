@@ -5240,6 +5240,129 @@ function mountRoyaleCard(){
     else boot();
 })();
 
+
+/* ============================================================
+   NEXUS ROYALE — SALVATAGGIO PROGRESSI (backup profilo)
+   ------------------------------------------------------------
+   ============================================================ */
+
+   (function(){
+ 
+  // --- legge un codice di salvataggio completo dal gioco ---
+  function parseRoyaleSave(raw){
+    const txt = (raw||'').trim();
+    if(!txt) return {ok:false, err:'Nessun codice inserito.'};
+    if(txt.indexOf('NXS1:') !== 0) return {ok:false, err:'Codice non riconosciuto (deve iniziare con NXS1:).'};
+    let data;
+    try{ data = JSON.parse(decodeURIComponent(escape(atob(txt.slice(5))))); }
+    catch(e){ try{ data = JSON.parse(txt.slice(5)); }catch(e2){ return {ok:false, err:'Codice danneggiato o incompleto.'}; } }
+    if(!data || data.kind !== 'nexusSave') return {ok:false, err:'Codice non valido per il salvataggio.'};
+    return {ok:true, data};
+  }
+ 
+  // --- salva il backup del cliente in InkAnimus ---
+  window.redeemRoyaleSave = function(raw){
+    const res = parseRoyaleSave(raw);
+    if(!res.ok){ if(typeof sfx==='function') sfx('error'); toast(res.err,'error'); return false; }
+    const d = res.data, R = nrState();
+ 
+    // memorizza il codice grezzo (verra' ripassato al gioco all'avvio)
+    R.save = 'NXS1:' + btoa(unescape(encodeURIComponent(JSON.stringify(d))));
+    R.saveTs = d.ts || Date.now();
+ 
+    // aggiorna anche le statistiche mostrate + quelle per il gestionale
+    R.matches = Math.max(R.matches||0, d.matches||0);
+    R.wins    = Math.max(R.wins||0,    d.wins||0);
+    R.kills   = Math.max(R.kills||0,   d.kills||0);
+    if(d.best && d.best < (R.best||99)) R.best = d.best;
+    R.bestKills = Math.max(R.bestKills||0, d.bestKills||0);
+    R.totalDmg  = Math.max(R.totalDmg||0,  d.totalDmg||0);
+    R.topScore  = Math.max(R.topScore||0,  d.topScore||0);
+    R.lifetime  = Math.max(R.lifetime||0,  d.lifetime||0);
+ 
+    saveState();
+    if(typeof updateStatsPanel === 'function'){ try{ updateStatsPanel(); }catch(e){} }
+    if(typeof renderRoyaleStats === 'function'){ try{ renderRoyaleStats(); }catch(e){} }
+ 
+    if(typeof sfx==='function') sfx('purchase');
+    toast('Progressi salvati! Ora sono al sicuro su InkAnimus.','success');
+    return true;
+  };
+ 
+  // --- finestra per incollare il codice di salvataggio ---
+  window.openRoyaleSave = function(){
+    if(typeof sfx==='function') sfx('click');
+    showCustomModal(''
+      + '<div class="modal-title">SALVA PROGRESSI - NEXUS ROYALE</div>'
+      + '<div class="modal-body">'
+      + '  <p style="font-size:0.78rem;color:#8bb4cb;margin-bottom:8px;">Nel gioco apri <b>INVIA CREDITI A INKANIMUS</b> e premi <b>SALVA PROGRESSI SU INKANIMUS</b>. Copia il codice e incollalo qui: i tuoi personaggi, crediti e statistiche resteranno al sicuro.</p>'
+      + '  <textarea id="nr-save" rows="4" placeholder="NXS1:..." style="width:100%;background:#000c18;color:#39ff14;border:1px solid rgba(0,243,255,0.35);border-radius:6px;padding:8px;font-family:monospace;font-size:0.72rem;"></textarea>'
+      + '</div>'
+      + '<div class="modal-actions">'
+      + '  <button class="btn" onclick="doRoyaleSave()">SALVA</button>'
+      + '  <button class="btn btn-ghost" onclick="hideModal()">ANNULLA</button>'
+      + '</div>');
+  };
+  window.doRoyaleSave = function(){
+    const ta = document.getElementById('nr-save');
+    if(ta && redeemRoyaleSave(ta.value)) hideModal();
+  };
+ 
+  // --- apre il gioco passando il salvataggio (sostituisce openNexusRoyale) ---
+  window.openNexusRoyale = function(){
+    if(typeof sfx==='function') sfx('click');
+    if(NEXUS_ROYALE_URL.indexOf('TUO-SITO') !== -1){
+      toast('Configura NEXUS_ROYALE_URL nel codice.','error'); return;
+    }
+    let url = NEXUS_ROYALE_URL;
+    const R = STATE.royale || {};
+    if(R.save){
+      url += (url.indexOf('?') === -1 ? '?' : '&') + 'save=' + encodeURIComponent(R.save);
+    }
+    window.open(url, '_blank', 'noopener');
+  };
+ 
+  // --- aggiunge il bottone "SALVA PROGRESSI" nella card Nexus Royale ---
+  function addSaveButton(){
+    const card = document.getElementById('nexus-royale-card');
+    if(!card || document.getElementById('nr-save-btn')) return !!card;
+    const rowDiv = card.querySelector('div[style*="display:flex;gap:8px"]');
+    if(!rowDiv) return false;
+    const btn = document.createElement('button');
+    btn.id = 'nr-save-btn';
+    btn.className = 'btn';
+    btn.style.cssText = 'flex:1;min-width:130px;background:linear-gradient(160deg,rgba(0,40,20,0.6),rgba(0,20,10,0.6));border-color:rgba(57,255,20,0.5);';
+    btn.textContent = 'SALVA PROGRESSI';
+    btn.setAttribute('onclick','openRoyaleSave()');
+    rowDiv.appendChild(btn);
+    return true;
+  }
+  const bootSave = () => { if(!addSaveButton()) setTimeout(bootSave, 700); };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootSave);
+  else bootSave();
+ 
+  // --- manda anche le statistiche COMPLETE al gestionale ---
+  if(typeof buildSyncPackage === 'function' && !buildSyncPackage.__royaleSave){
+    const orig = buildSyncPackage;
+    window.buildSyncPackage = function(){
+      const pkg = orig.apply(this, arguments);
+      try{
+        const R = STATE.royale || {};
+        pkg.royale = Object.assign(pkg.royale || {}, {
+          matches: R.matches||0, wins: R.wins||0, kills: R.kills||0,
+          best: R.best||99, bestKills: R.bestKills||0, totalDmg: R.totalDmg||0,
+          topScore: R.topScore||0, lifetime: R.lifetime||0,
+          crImported: R.crImported||0, tids: R.imported||[],
+          hasSave: !!R.save, saveTs: R.saveTs||0
+        });
+      }catch(e){}
+      return pkg;
+    };
+    window.buildSyncPackage.__royaleSave = true;
+  }
+ 
+})();
+
 </script>
 </body>
 </html>
